@@ -1,0 +1,255 @@
+# russian_roulette_bot.py
+# Requires: python-telegram-bot >= 20
+# pip install python-telegram-bot
+
+import logging
+import random
+from typing import Dict, List, Optional
+from telegram import Update, User
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# ----- Game state per chat -----
+class RouletteGame:
+    def __init__(self, chamber_size: int = 6, lethal_bullets: int = 1):
+        self.chamber_size = chamber_size
+        self.lethal_bullets = lethal_bullets
+        self.players: List[User] = []
+        self.started: bool = False
+        self.current_index: int = 0
+        # Represent chamber as list of booleans where True = bullet
+        self.chamber: List[bool] = []
+        self.reload()
+
+    def reload(self):
+        # create chamber with lethal_bullets randomly placed
+        self.chamber = [False] * self.chamber_size
+        positions = random.sample(range(self.chamber_size), self.lethal_bullets)
+        for p in positions:
+            self.chamber[p] = True
+        # spin -> random starting position
+        self.spin_index = random.randrange(self.chamber_size)
+        logger.info(f"Chamber (bullet positions): {positions}, start at {self.spin_index}")
+
+    def add_player(self, user: User) -> bool:
+        if any(p.id == user.id for p in self.players):
+            return False
+        self.players.append(user)
+        return True
+
+    def remove_player(self, user_id: int) -> bool:
+        for i, p in enumerate(self.players):
+            if p.id == user_id:
+                del self.players[i]
+                # adjust current_index if necessary
+                if i < self.current_index:
+                    self.current_index -= 1
+                if self.current_index >= len(self.players):
+                    self.current_index = 0
+                return True
+        return False
+
+    def start(self) -> bool:
+        if self.started or len(self.players) < 2:
+            return False
+        self.started = True
+        # reset indexes and reload chamber
+        self.current_index = 0
+        self.reload()
+        return True
+
+    def force_start_singleplayer(self, user: User):
+        # convenience: start with single player (private chat)
+        if not self.players:
+            self.players.append(user)
+        self.started = True
+        self.current_index = 0
+        self.reload()
+
+    def pull_trigger(self) -> Dict:
+        """Returns result dict:
+           { 'dead': bool, 'player': User, 'spin_pos': int, 'bullet': bool }
+        """
+        if not self.started or not self.players:
+            raise RuntimeError("Game not started or no players")
+
+        player = self.players[self.current_index]
+        pos = self.spin_index
+        bullet = self.chamber[pos]
+
+        result = {"dead": bullet, "player": player, "spin_pos": pos, "bullet": bullet}
+
+        # advance spin position (simulate chamber rotation to next) — Roulette usually advances one
+        self.spin_index = (self.spin_index + 1) % self.chamber_size
+
+        if bullet:
+            # remove player
+            self.remove_player(player.id)
+            # if more than one bullet setting, bullet stays used (we keep it used)
+            self.chamber[pos] = False  # bullet 'fired'
+            # no change to current_index because remove_player adjusted it
+        else:
+            # move to next player
+            self.current_index = (self.current_index + 1) % len(self.players)
+
+        # if players <=1, mark game ended
+        if len(self.players) <= 1:
+            self.started = False
+
+        return result
+
+    def status_text(self) -> str:
+        s = f"Players ({len(self.players)}):\n"
+        for i, p in enumerate(self.players):
+            mark = " <- current" if i == self.current_index and self.started else ""
+            s += f"{i+1}. {p.full_name} (@{p.username or 'no-username'}){mark}\n"
+        s += f"Started: {self.started}\nChamber size: {self.chamber_size}, lethal bullets: {self.lethal_bullets}\n"
+        return s
+
+
+# Global games container keyed by chat_id
+GAMES: Dict[int, RouletteGame] = {}
+
+# ----- Helper functions -----
+def get_game(chat_id: int) -> RouletteGame:
+    if chat_id not in GAMES:
+        GAMES[chat_id] = RouletteGame()
+    return GAMES[chat_id]
+
+
+# ----- Command handlers -----
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "سلام! من بات رولت روسی (شبیه‌سازی) هستم.\n"
+        "دستورات:\n"
+        "/join - وارد بازی شو\n"
+        "/leave - ترک بازی\n"
+        "/startgame - شروع بازی (نیاز به حداقل 2 بازیکن در گروه)\n"
+        "/pull - کشیدن ماشه (نوبتی)\n"
+        "/status - وضعیت بازی\n"
+        "/reset - ریست بازی (ادمین یا سازنده چت)\n\n"
+        "توجه: این بازی شبیه‌سازی است و خطر واقعی وجود ندارد."
+    )
+
+
+async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    game = get_game(chat_id)
+    added = game.add_player(user)
+    if added:
+        await update.message.reply_text(f"{user.full_name} وارد بازی شد.")
+    else:
+        await update.message.reply_text("شما قبلاً در بازی هستید.")
+
+
+async def leave_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    game = get_game(chat_id)
+    removed = game.remove_player(user.id)
+    if removed:
+        await update.message.reply_text(f"{user.full_name} از بازی خارج شد.")
+    else:
+        await update.message.reply_text("شما در بازی نبودید.")
+
+
+async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    game = get_game(chat_id)
+    await update.message.reply_text(game.status_text())
+
+
+async def startgame_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    game = get_game(chat_id)
+
+    # If private chat and single user, allow singleplayer
+    if update.effective_chat.type == "private":
+        game.force_start_singleplayer(update.effective_user)
+        await update.message.reply_text("بازی یک‌نفره شروع شد — هر بار /pull بزن.")
+        return
+
+    if game.start():
+        await update.message.reply_text("بازی شروع شد! نوبت با: " + game.players[game.current_index].full_name)
+    else:
+        await update.message.reply_text("نمی‌توان بازی را شروع کرد — کم‌تر از 2 بازیکن یا بازی قبلاً شروع شده.")
+
+
+async def pull_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    game = get_game(chat_id)
+
+    if not game.started:
+        await update.message.reply_text("بازی شروع نشده. از /startgame استفاده کنید.")
+        return
+
+    # check if it's the user's turn
+    current_player = game.players[game.current_index]
+    if user.id != current_player.id:
+        await update.message.reply_text(fالان نوبت {current_player.full_name} است. لطفا صبر کنید.")
+        return
+
+    result = game.pull_trigger()
+    if result["dead"]:
+        # "dead" message
+        await update.message.reply_text(
+            f"💥 بوم! {result['player'].full_name} بدشانس بود و از بازی حذف شد."
+        )
+    else:
+        await update.message.reply_text(f"کلیک — {result['player'].full_name} سالم ماند. نوبت بعدی: {game.players[game.current_index].full_name}")
+
+    if not game.started:
+        # game ended (<=1 player left)
+        if len(game.players) == 1:
+            await update.message.reply_text(f"🏆 بازی تمام شد! برنده: {game.players[0].full_name}")
+        else:
+            await update.message.reply_text("بازی تمام شد — هیچ بازیکنی باقی نماند.")
+
+
+async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    # optionally check admin privileges — simple approach: allow chat creator/admins only
+    # For simplicity now: allow anyone in private chat or chat creator/admins in group
+    can = False
+    if update.effective_chat.type == "private":
+        can = True
+    else:
+        member = await context.bot.get_chat_member(chat_id, update.effective_user.id)
+        if member.status in ("administrator", "creator"):
+            can = True
+
+    if not can:
+        await update.message.reply_text("فقط ادمین یا مالک گروه می‌تواند بازی را ریست کند.")
+        return
+
+    if chat_id in GAMES:
+        del GAMES[chat_id]
+    await update.message.reply_text("وضعیت بازی ریست شد.")
+
+
+# ----- Main launcher -----
+def main():
+    import os
+    TOKEN = "7324627431:AAH8CInOMAbNJB-ZQWAoru0iDFVJYE4IyRM"
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("join", join_cmd))
+    app.add_handler(CommandHandler("leave", leave_cmd))
+    app.add_handler(CommandHandler("startgame", startgame_cmd))
+    app.add_handler(CommandHandler("pull", pull_cmd))
+    app.add_handler(CommandHandler("status", status_cmd))
+    app.add_handler(CommandHandler("reset", reset_cmd))
+
+    logger.info("Bot is starting...")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
