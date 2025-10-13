@@ -9,7 +9,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 # ====== پیکربندی ======
-TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"  # اینجا توکن بات‌تو بذار
+TOKEN = "7324627431:AAH8CInOMAbNJB-ZQWAoru0iDFVJYE4IyRM"  # اینجا توکن بات‌تو بذار
 
 # ====== مدل داده بازی ======
 @dataclass
@@ -258,5 +258,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
