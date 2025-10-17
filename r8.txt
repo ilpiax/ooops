@@ -1,263 +1,100 @@
-# russian_roulette_bot.py
-# نیازمند: python-telegram-bot v20+ (async)
-import asyncio
-import random
-from typing import Dict, List, Optional
-from dataclasses import dataclass, field
+<?php
+define('8211529932:AAHPCcZp3CcHBuDeB7gT6wA4S1psCxfcFHo');
+function bot($method,$datas=[]){
+    $url = "https://api.telegram.org/bot".API_KEY."/".$method;
+    $ch = curl_init();
+    curl_setopt($ch,CURLOPT_URL,$url);
+    curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
+    curl_setopt($ch,CURLOPT_POSTFIELDS,$datas);
+    $res = curl_exec($ch);
+    if(curl_error($ch)){
+        var_dump(curl_error($ch));
+    }else{
+        return json_decode($res);
+    }
+}
+$update = json_decode(file_get_contents('php://input'));
+$msg = $update->message;
+$text = $msg->text;
+mkdir("data");
+$first = $msg->from->first_name;
+$last = $msg->from->last_name;
+$chat_id = $msg->chat->id;
+$from_id = $msg->from->id;
+$message_id = $msg->message_id;
+$admin = 311526009;
+mkdir("data");
+mkdir("data/$from_id");
+	//================//
+function sendaction($chat_id, $action){
+bot('sendchataction',[
+'chat_id'=>$chat_id,
+'action'=>$action
+]);
+}
+function save($filename,$TXTdata)
+	{
+	$myfile = fopen($filename, "w") or die("Unable to open file!");
+	fwrite($myfile, "$TXTdata");
+	fclose($myfile);
+	}
+     //====================//
+if ($text == '/start') {
+sendaction($chat_id,'typing');
+mkdir("data/$from_id");
+bot('sendMessage',[
+'chat_id'=>$chat_id,
+'text'=>"سلام دوست عزیز ...😄\n\n- به ربات دریافت پیام ناشناس خوش اومدی من با لینکی مخصوصی که به تو میدم میتونی اون لینک رو به دوستانت بدی ...✅\n\nلازم نیست کاربری که میخواد برات پیام ارسال کنه حتما باید تو ربات بیاد بلکه این نسخه از دریافت پیام ناشناس تحب وب هست و کاربران میتونند به راحتی برات پیام ارسال کنند ...☺️\n\nراستی پیام هایی که ارسال میشه میتونی تو همیت ربات دریافت کنیش ...💐\n\n‼️ Channel: @hackgm
+❤️ #king_a_king",
+'reply_markup'=>json_encode([
+            'resize_keyboard'=>true,
+            'keyboard'=>[
+              [
+              ['text'=>"دریافت لینک مخصوص من 🍃"]
+              ],
+              ],
+        ])
+        ]);
+}
+if ($text == "دریافت لینک مخصوص من 🍃"){
+sendaction($chat_id,'typing');
+mkdir("send");
+mkdir("send/$from_id");
+$source = file_get_contents("bot/index.php");
+$test = file_get_contents("bot/index.html");
+$source = str_replace("**ID**",$from_id,$source);
+save("send/$from_id/index.php",$source);
+save("send/$from_id/index.html",$test);
+bot('sendmessage',[
+'chat_id'=>$chat_id,
+'text'=>"سلام $first $last هستم ...😋
 
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+رو لینک زیر بزن و هر انتقاد،پیشنهاد یا اعترافی داری با خیال راحت بزن چون پیامت بدون اسم یا چیز دیگه ای برای من ارسال میشه ...✅
 
-# ====== پیکربندی ======
-TOKEN = "7324627431:AAH8CInOMAbNJB-ZQWAoru0iDFVJYE4IyRM"  # اینجا توکن بات‌تو بذار
+راستی لازم نیست تو ربات پیامت رو ارسال کنی ...😉
+چون تحت وب هست و به اسونی و راحتی میتونی میامت رو ارسال کنی ...😜
 
-# ====== مدل داده بازی ======
-@dataclass
-class Game:
-    chat_id: int
-    players: List[int] = field(default_factory=list)        # شناسه‌های تلگرام بازیکنان
-    player_names: Dict[int, str] = field(default_factory=dict)  # id -> نام نمایش
-    current_index: int = 0
-    chambers: List[bool] = field(default_factory=list)  # True=گلوله، False=خالی
-    started: bool = False
-    eliminated: List[int] = field(default_factory=list)
+😀 لینک من :
 
-    def reset_chambers(self, chambers_count: int = 6, bullets: int = 1):
-        # ایجاد یک دور جدید: یک گلوله در نُه خان گذاشته می‌شود (پیش‌فرض 1 گلوله/6 خان)
-        arr = [False] * chambers_count
-        for _ in range(bullets):
-            pos = random.randrange(0, chambers_count)
-            while arr[pos]:
-                pos = random.randrange(0, chambers_count)
-            arr[pos] = True
-        random.shuffle(arr)
-        self.chambers = arr
-        self.current_index = 0
+https://king_a_king.owhost.ir/da/send/$from_id/index.html
 
-    def spin_and_shoot(self) -> bool:
-        # بررسی آخرین خان و برگشت True = گلوله شلیک شد
-        if not self.chambers:
-            self.reset_chambers()
-        res = self.chambers[self.current_index]
-        # پیشرفت نوبت (گردشی)
-        self.current_index = (self.current_index + 1) % len(self.chambers)
-        return res
-
-# نگهداری بازی‌ها بر حسب chat_id (چت گروهی یا خصوصی)
-GAMES: Dict[int, Game] = {}
-
-# ====== کمکی‌ها ======
-def get_or_create_game(chat_id: int) -> Game:
-    if chat_id not in GAMES:
-        GAMES[chat_id] = Game(chat_id=chat_id)
-    return GAMES[chat_id]
-
-def safe_name(user) -> str:
-    if user.full_name:
-        return user.full_name
-    return user.username or str(user.id)
-
-# ====== هندلرها ======
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 ربات رولت روسی (شبیه‌سازی). فرمان‌ها:\n"
-        "/join — پیوستن به بازی\n"
-        "/leave — خارج شدن از بازی\n"
-        "/players — نمایش بازیکنان\n"
-        "/newgame — ساختن بازی جدید (تنظیمات پیش‌فرض)\n"
-        "/startgame — شروع بازی\n"
-        "/shoot — شلیک (نوبتی)\n"
-        "/status — وضعیت بازی\n"
-        "/help — همین پیام"
-    )
-
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start_cmd(update, context)
-
-async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    game = get_or_create_game(chat_id)
-
-    if user.id in game.players and user.id not in game.eliminated:
-        await update.message.reply_text("تو قبلاً به بازی پیوستی.")
-        return
-
-    game.players.append(user.id)
-    game.player_names[user.id] = safe_name(user)
-    # اگر قبلاً حذف شده بود، بازی رو ریست حذف برای اون
-    if user.id in game.eliminated:
-        game.eliminated.remove(user.id)
-
-    await update.message.reply_text(f"{safe_name(user)} به بازی پیوست.")
-
-async def leave_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    game = get_or_create_game(chat_id)
-
-    if user.id in game.players:
-        game.players.remove(user.id)
-        game.player_names.pop(user.id, None)
-        if user.id in game.eliminated:
-            game.eliminated.remove(user.id)
-        await update.message.reply_text(f"{safe_name(user)} از بازی خارج شد.")
-    else:
-        await update.message.reply_text("تو عضو بازی نیستی.")
-
-async def players_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    game = get_or_create_game(chat_id)
-    if not game.players:
-        await update.message.reply_text("فعلاً هیچ بازیکنی ثبت نشده. با /join بپیوند.")
-        return
-    lines = []
-    for i, pid in enumerate(game.players, start=1):
-        name = game.player_names.get(pid, str(pid))
-        status = "❌" if pid in game.eliminated else "🟢"
-        lines.append(f"{i}. {name} {status}")
-    await update.message.reply_text("بازیکنان:\n" + "\n".join(lines))
-
-async def newgame_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    game = get_or_create_game(chat_id)
-    # پارامترها: می‌تونیم از آرگومان فرمان تعداد خان/تعداد گلوله رو بگیریم
-    args = context.args
-    try:
-        if len(args) >= 1:
-            chambers = int(args[0])
-        else:
-            chambers = 6
-        if len(args) >= 2:
-            bullets = int(args[1])
-        else:
-            bullets = 1
-    except ValueError:
-        await update.message.reply_text("استفاده: /newgame [chambers] [bullets] — مثال: /newgame 6 1")
-        return
-
-    game.reset_chambers(chambers_count=chambers, bullets=bullets)
-    game.started = False
-    game.eliminated = []
-    await update.message.reply_text(f"بازی جدید ساخته شد — {chambers} خان، {bullets} گلوله. برای شروع /startgame بزن.")
-
-async def startgame_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    game = get_or_create_game(chat_id)
-
-    if len(game.players) < 2:
-        await update.message.reply_text("برای شروع حداقل دو بازیکن لازم است. با /join بازیکن جذب کن.")
-        return
-
-    if not game.chambers:
-        game.reset_chambers()  # پیش‌فرض
-    game.started = True
-    game.eliminated = []
-    # انتخاب بازیکن شروع تصادفی
-    game.current_index = random.randrange(0, len(game.chambers))
-    # اما current_index برای شلیک داخل chambers استفاده میشه؛ برای نوبت دادن، بهتر بذاریم index بازیکنان
-    game.current_index = 0
-    await update.message.reply_text(
-        "🎯 بازی شروع شد!\nنوبتِ: " + game.player_names[game.players[0]] + "\nبرای شلیک /shoot را ارسال کنید."
-    )
-
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    game = get_or_create_game(chat_id)
-    text = []
-    text.append(f"شروع شده؟ {'بله' if game.started else 'خیر'}")
-    text.append(f"تعداد بازیکن: {len(game.players)}")
-    alive = [p for p in game.players if p not in game.eliminated]
-    text.append(f"در بازی مانده: {len(alive)}")
-    if alive:
-        names = ", ".join(game.player_names.get(pid, str(pid)) for pid in alive)
-        text.append("بازیکنان زنده: " + names)
-        # نوبت فعلی:
-        curr = alive[0] if game.started else (game.players[0] if game.players else None)
-        if curr:
-            text.append("نوبت فعلی: " + game.player_names.get(curr, str(curr)))
-    await update.message.reply_text("\n".join(text))
-
-async def shoot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    game = get_or_create_game(chat_id)
-
-    # اول چک کنیم بازی شروع شده
-    if not game.started:
-        await update.message.reply_text("بازی شروع نشده. از /startgame برای شروع استفاده کنید.")
-        return
-
-    if user.id not in game.players:
-        await update.message.reply_text("تو عضو بازی نیستی. با /join وارد شو.")
-        return
-
-    # محاسبه‌ی لیست بازیکنان زنده و نوبت
-    alive = [p for p in game.players if p not in game.eliminated]
-    if not alive:
-        await update.message.reply_text("هیچ بازیکنی زنده نیست. بازی را با /newgame ریست کن.")
-        return
-
-    # بررسی اینکه آیا نوبت کاربر است
-    # نوبت را بر اساس ترتیب 'alive' و game.current_index نگه می‌داریم
-    # تضمین کنیم current_index در محدوده است
-    game.current_index %= len(alive)
-    current_player_id = alive[game.current_index]
-
-    if current_player_id != user.id:
-        await update.message.reply_text(f"الان نوبت {game.player_names[current_player_id]} است — لطفاً صبر کن تا نوبتت بشه.")
-        return
-
-    # شلیک
-    fired = game.spin_and_shoot()
-    # اگر شلیک شد -> حذف بازیکن فعلی
-    if fired:
-        game.eliminated.append(user.id)
-        await update.message.reply_text(f"💥 بوم! {safe_name(user)} گلوله خورد و حذف شد.")
-        # بررسی پایان بازی: اگر فقط 0 یا 1 نفر مانده باشد
-        remaining = [p for p in game.players if p not in game.eliminated]
-        if len(remaining) <= 1:
-            if remaining:
-                await update.message.reply_text(f"🏆 بازی تمام شد. برنده: {game.player_names[remaining[0]]}")
-            else:
-                await update.message.reply_text("بازی تمام شد — هیچ برنده‌ای نماند.")
-            game.started = False
-            return
-        else:
-            # نوبت بعدی: همان ایندکس (چون این ایندکس به ترتیب alive نگه داشته شده)
-            game.current_index %= len(remaining)
-            await update.message.reply_text(f"نوبت بعدی: {game.player_names[remaining[game.current_index]]}")
-            return
-    else:
-        await update.message.reply_text(f"click... {safe_name(user)} شانس آورد — سالم موند.")
-        # رفتن به نوبت بعدی
-        game.current_index = (game.current_index + 1) % len([p for p in game.players if p not in game.eliminated])
-        alive = [p for p in game.players if p not in game.eliminated]
-        await update.message.reply_text(f"نوبت بعدی: {game.player_names[alive[game.current_index]]}")
-
-async def unknown_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("متوجه نشدم — /help را بزن برای فرمان‌ها.")
-
-# ====== بوت اجرا ======
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("join", join_cmd))
-    app.add_handler(CommandHandler("leave", leave_cmd))
-    app.add_handler(CommandHandler("players", players_cmd))
-    app.add_handler(CommandHandler("newgame", newgame_cmd))
-    app.add_handler(CommandHandler("startgame", startgame_cmd))
-    app.add_handler(CommandHandler("shoot", shoot_cmd))
-    app.add_handler(CommandHandler("status", status_cmd))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_msg))
-
-    print("Bot started...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-
-
-
+id bot : @add_group_robot",
+]);
+}
+if($text == "/da" && $from_id == $admin){
+    $user = file_get_contents('data/user.txt');
+    $member_id = explode("\n",$user);
+    $member_count = count($member_id) -1;
+    bot('sendMessage',[
+      'chat_id'=>$chat_id,
+      'text'=>"تعداد کل اعضا: $member_count",
+    ]);
+}
+$user = file_get_contents('data/user.txt');
+    $members = explode("\n",$user);
+    if (!in_array($chat_id,$members)){
+      $add_user = file_get_contents('data/user.txt');
+      $add_user .= $chat_id."\n";
+     file_put_contents('data/user.txt',$add_user);
+    }
+?>
